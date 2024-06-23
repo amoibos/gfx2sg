@@ -27,9 +27,21 @@ SG_COLOR_PALETTE = [(0x00, 0x00, 0x00), (0x00, 0x00, 0x00), (0x21, 0xC8, 0x42), 
                     (0x21, 0xB0, 0x3B), (0xC9, 0x5B, 0xBA), (0xCC, 0xCC, 0xCC), (0xFF, 0xFF, 0xFF)]
 
 
+def check_color_limit(img, limit):
+    width, height = img.size
+    for tile_y in range(height // TILE_HEIGHT):
+        for tile_x in range(width // TILE_WIDTH):
+            region = img.crop((tile_x * TILE_WIDTH, tile_y * TILE_HEIGHT, (tile_x + 1) * TILE_WIDTH,
+                                       (tile_y + 1) * TILE_HEIGHT))
+            #There is no check if there are more than 2 color per tile row!
+            #In this case, the 2 colors that occur most frequently are used
+            if len(region.getcolors()) > limit:
+                return False
+    return True
+
+
 def nearest_color(subjects, query):
     return min(subjects, key=lambda subject: sum((s - q) ** 2 for s, q in zip(subject, query)))
-
 
 def convert(output_name):
     with Image.open(output_name) as img:
@@ -38,8 +50,8 @@ def convert(output_name):
         color_cnt = len(img.getcolors(img.size[0]*img.size[1]))
         
         # do not use transparency color
-        if color_cnt > 15:
-            print("too many colors, platform supports only 15 colors", file=sys.stderr)
+        if not check_color_limit(img, 15):
+            print("too many colors in one tile, platform supports only 15 colors per tile", file=sys.stderr)
             return
 
         if width > MAX_X or height > MAX_Y:
@@ -56,7 +68,7 @@ def convert(output_name):
         color_index = {(0, 0, 0): 0}
 
         for idx, color in enumerate(img.getcolors()):
-            # import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
             color_index[color[-1]] = SG_COLOR_PALETTE.index(nearest_color(SG_COLOR_PALETTE, color[-1]))
 
         filename = path.splitext(output_name)[0]
