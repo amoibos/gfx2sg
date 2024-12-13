@@ -9,10 +9,10 @@ from os import path
 import sys
 import struct
 import argparse
-from PIL import Image, ImageOps
+from PIL import Image
 from collections import defaultdict 
 
-__VERSION__ = "0.5"
+__VERSION__ = "0.6"
 
 # 32 x 24 tiles filling a screen where a tile 8x8 tile dimension
 # for the SG the color depth is 1bit = 2 colors per tile line
@@ -24,8 +24,8 @@ MAX_COLORS = 16 - 1
 TILE_WIDTH = 8
 TILE_HEIGHT = 8
 
-# first color is used for transparent
-SG_COLOR_PALETTE = [(0x00, 0x00, 0x00), (0x00, 0x00, 0x00), (0x21, 0xC8, 0x42), (0x5E, 0xDC, 0x78),
+# first index of color palette is in the VDP9918 always transparent
+SG_COLOR_PALETTE = [(0xFFFF, 0xFFFF, 0xFFFF), (0x00, 0x00, 0x00), (0x21, 0xC8, 0x42), (0x5E, 0xDC, 0x78),
                     (0x54, 0x55, 0xED), (0x7D, 0x76, 0xFC), (0xD4, 0x52, 0x4D), (0x42, 0xEB, 0xF5),
                     (0xFC, 0x55, 0x54), (0xFF, 0x79, 0x78), (0xD4, 0xC1, 0x54), (0xE6, 0xCE, 0x80),
                     (0x21, 0xB0, 0x3B), (0xC9, 0x5B, 0xBA), (0xCC, 0xCC, 0xCC), (0xFF, 0xFF, 0xFF)]
@@ -47,7 +47,8 @@ def check_color_limit(img, limit):
 def nearest_color(subjects, query):
     return min(subjects, key=lambda subject: sum((s - q) ** 2 for s, q in zip(subject, query)))
 
-def convert(output_name, transparent_color, preview):
+def convert(output_name, transparent_color, preview, warn):
+    #print(f"params: {output_name} {transparent_color} {preview} {warn}")
     with Image.open(output_name) as img:
         if preview:
             preview_img = img.copy()
@@ -80,10 +81,13 @@ def convert(output_name, transparent_color, preview):
             # do not use transparent as black, overwrite transparent palette index
             if index == 0:
                 index = 1
+                print("replaced palette index 0 with 1")
             # allow specifying transparent palette index, useful for sprites
+            # background tiles could have transparence which leads to backdrop color
             if index == transparent_color:
                 index = 0
-            
+                print(f"replaced palette index {transparent_color} with 0")
+                
             color_index[color[-1]] = index
 
         filename = path.splitext(output_name)[0]
@@ -97,7 +101,7 @@ def convert(output_name, transparent_color, preview):
                     region = img.crop((tile_x * TILE_WIDTH, tile_y * TILE_HEIGHT, (tile_x + 1) * TILE_WIDTH,
                                        (tile_y + 1) * TILE_HEIGHT))
                     # no idea why I have to mirror the tile
-                    region = ImageOps.mirror(region)
+                    region = region.transpose(Image.FLIP_LEFT_RIGHT) 
                     data = [color_index[item] for item in region.getdata()]
                     for pos in range(0, len(data), TILE_HEIGHT):                        
                         colors_in_line = defaultdict(int)
@@ -109,20 +113,27 @@ def convert(output_name, transparent_color, preview):
                         # if there is no second place then use transparent color    
                         
                         # warn if were lose color information due tile line limation of TMS9918
-                        if len(colors_in_line) > 2:
+                        if len(colors_in_line) > 2 and warn:
                             print(f"[info]: color clash({len(colors_in_line)} > 2) detected in line {pos} at tile index x={tile_x} y={tile_y}")
                         
                         # use color index for ordering
                         colors = sorted(colors_in_line.items(), key=lambda x: x[-1])
-                        colors.insert(0, (0, 0))    
+                        
+                        
+                        # we need a second color when there line is complete transparent and background color when there is filled by another color
+                        if transparent_color and len(colors) == 1 and colors[0][0] == 0:
+                            colors.insert(0, (15, 0))
+                        else:
+                            colors.insert(0, (0, 0))    
                         foreground = colors[-1][0]
                         background = colors[-2][0]
                         
                         val = 0
                         for column in range(TILE_WIDTH):
-                            val += (int(data[pos + column] == background)) << column
+                            val += (int(data[pos + column] == background)) <<  column
                             if preview:
-                                preview_img.putpixel((tile_x * TILE_WIDTH + 7 - column, tile_y * TILE_HEIGHT + pos // 8),  SG_COLOR_PALETTE[background if int(data[pos + column] == background) else foreground])
+                                preview_img.putpixel((tile_x * TILE_WIDTH + 7 - column, tile_y * TILE_HEIGHT + pos // 8),  
+                                    SG_COLOR_PALETTE[background if int(data[pos + column] == background) else foreground])
                         
                         tile_data = struct.pack('B', val)
                         tile_writer.write(tile_data)
@@ -132,15 +143,16 @@ def convert(output_name, transparent_color, preview):
                     #import pdb; pdb.set_trace()
                     key = tuple(data)
                     if key in used_tile:
-                        print(f"[info]: duplicate tile {key} detected at index {index}, last seen at {used_tile[key]}")
+                        if warn:
+                            print(f"[info]: duplicate tile {key} detected at index {index}, last seen at {used_tile[key]}")
                     used_tile[key] = index
                     index += 1
         
         if preview:
             preview_img.show()
         
-def process(filename, transparent_color, preview):
-    convert(filename, transparent_color, preview)
+def process(filename, transparent_color, preview, warn):
+    convert(filename, transparent_color, preview, warn)
 
 def main():
     print(f"gfx2sg v{__VERSION__}")
@@ -148,6 +160,7 @@ def main():
     parser.add_argument("filename", help="image file", type=str)
     parser.add_argument("--transparent", help="index of color used used for transparency in sprites", type=int)
     parser.add_argument("--preview", help="switch for show image after color conversion",  action="store_true")
+    parser.add_argument("--warn", help="show warnings",  action="store_true")
     args = parser.parse_args()
     if  args. transparent:
         if args.transparent < 1 or args.transparent > MAX_COLORS:
@@ -155,9 +168,9 @@ def main():
             exit(-1)
         
     
-    transparent_color = args.transparent if args.transparent else -1
+    transparent_color = args.transparent if args.transparent else none
     if path.exists(args.filename):
-        process(args.filename, transparent_color, args.preview)
+        process(args.filename, transparent_color, args.preview, args.warn)
     else:
         print("file %s doesn't exist" % (sys.argv[1]), file=sys.stderr)
         exit(-2)
