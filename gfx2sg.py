@@ -81,12 +81,12 @@ def convert(output_name, transparent_color, preview, warn):
             # do not use transparent as black, overwrite transparent palette index
             if index == 0:
                 index = 1
-                print("replaced palette index 0 with 1")
+                print(f"remove transparence: replaced color {color[-1]} from palette index 0 with 1")
             # allow specifying transparent palette index, useful for sprites
             # background tiles could have transparence which leads to backdrop color
             if index == transparent_color:
                 index = 0
-                print(f"replaced palette index {transparent_color} with 0")
+                print(f"transparence correction: replaced color {color[-1]} from palette index {transparent_color} with 0")
                 
             color_index[color[-1]] = index
 
@@ -103,6 +103,7 @@ def convert(output_name, transparent_color, preview, warn):
                     # no idea why I have to mirror the tile
                     region = region.transpose(Image.FLIP_LEFT_RIGHT) 
                     data = [color_index[item] for item in region.getdata()]
+                    colors = []
                     for pos in range(0, len(data), TILE_HEIGHT):                        
                         colors_in_line = defaultdict(int)
                         # get color distribution in line of the current tile
@@ -117,16 +118,30 @@ def convert(output_name, transparent_color, preview, warn):
                             print(f"[info]: color clash({len(colors_in_line)} > 2) detected in line {pos} at tile index x={tile_x} y={tile_y}")
                         
                         # use color index for ordering
-                        colors = sorted(colors_in_line.items(), key=lambda x: x[-1])
+                        # when computed 2 sprite colors per line, reuse it, otherwise we see problems in encoding of sprites 
+                        if transparent_color:
+                            if not colors or len(list(dict.fromkeys(data))) > 2:
+                                colors = sorted(colors_in_line.items(), key=lambda x: x[-1])
                         
+                        #if tile_x == 9 and tile_y == 0:
+                        #    import pdb; pdb.set_trace()
                         
                         # we need a second color when there line is complete transparent and background color when there is filled by another color
-                        if transparent_color and len(colors) == 1 and colors[0][0] == 0:
-                            colors.insert(0, (15, 0))
-                        else:
-                            colors.insert(0, (0, 0))    
+                        if transparent_color and len(colors) == 1:
+                            missing_colors = sorted(list(dict.fromkeys(data)))
+                            if colors[0][0] in missing_colors:
+                                missing_colors.remove(colors[0][0])
+                            if len(missing_colors) >= 1:
+                                colors.insert(1 if colors[0][0] == 0 else 0, (missing_colors[0], 0))
+                            if len(missing_colors) > 1:
+                                print(f"tile x={tile_x} y={tile_y} has {len(missing_colors) + len(colors) } colors, violation of sprite color limit!")
+                        
+                        colors.insert(0, (0, 0))    
                         foreground = colors[-1][0]
                         background = colors[-2][0]
+                        
+                        #if tile_x == 9 and tile_y == 0:
+                        #    import pdb; pdb.set_trace()
                         
                         val = 0
                         for column in range(TILE_WIDTH):
