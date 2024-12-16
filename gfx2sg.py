@@ -12,7 +12,7 @@ import argparse
 from PIL import Image
 from collections import defaultdict 
 
-__VERSION__ = "0.6"
+__VERSION__ = "0.7"
 
 # 32 x 24 tiles filling a screen where a tile 8x8 tile dimension
 # for the SG the color depth is 1bit = 2 colors per tile line
@@ -119,9 +119,8 @@ def convert(output_name, transparent_color, preview, warn):
                         
                         # use color index for ordering
                         # when computed 2 sprite colors per line, reuse it, otherwise we see problems in encoding of sprites 
-                        if transparent_color:
-                            if not colors or len(list(dict.fromkeys(data))) > 2:
-                                colors = sorted(colors_in_line.items(), key=lambda x: x[-1])
+                        if not transparent_color or not colors or len(list(dict.fromkeys(data))) > 2:
+                            colors = sorted(colors_in_line.items(), key=lambda x: x[0] if transparent_color else x[-1])
                         
                         #if tile_x == 9 and tile_y == 0:
                         #    import pdb; pdb.set_trace()
@@ -134,13 +133,18 @@ def convert(output_name, transparent_color, preview, warn):
                             if len(missing_colors) >= 1:
                                 colors.insert(1 if colors[0][0] == 0 else 0, (missing_colors[0], 0))
                             if len(missing_colors) > 1:
-                                print(f"tile x={tile_x} y={tile_y} has {len(missing_colors) + len(colors) } colors, violation of sprite color limit!")
+                                print(f"tile x={tile_x} y={tile_y} has {len(missing_colors) + len(colors) } colors, maybe not usable for sprites due random pattern")
                         
-                        colors.insert(0, (0, 0))    
-                        foreground = colors[-1][0]
-                        background = colors[-2][0]
                         
-                        #if tile_x == 9 and tile_y == 0:
+                        if len(colors) < 2:
+                            if colors[0][0] == 0:
+                                colors.insert(1, (1, 0))
+                            else:
+                                colors.insert(0, (1, 0))
+                        foreground = colors[-2][0]
+                        background = colors[-1][0]
+                        
+                        #if tile_x == 7 and tile_y == 0:
                         #    import pdb; pdb.set_trace()
                         
                         val = 0
@@ -176,6 +180,7 @@ def main():
     parser.add_argument("--transparent", help="index of color used used for transparency in sprites", type=int)
     parser.add_argument("--preview", help="switch for show image after color conversion",  action="store_true")
     parser.add_argument("--warn", help="show warnings",  action="store_true")
+    parser.add_argument("--compress", help="compress ZX7",  action="store_true")
     args = parser.parse_args()
     if  args. transparent:
         if args.transparent < 1 or args.transparent > MAX_COLORS:
@@ -183,7 +188,7 @@ def main():
             exit(-1)
         
     
-    transparent_color = args.transparent if args.transparent else none
+    transparent_color = args.transparent if args.transparent else None
     if path.exists(args.filename):
         process(args.filename, transparent_color, args.preview, args.warn)
     else:
